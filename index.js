@@ -1,116 +1,128 @@
 const fs = require('fs')
 const axios = require('axios')
-const dealers = require('./input/revendeurs_010422.json')
 
 class geocode {
   KEY = 'AIzaSyCegDsZdHyK1Ea4KCdnjFRlIBkIkcdCiA8'
   API = 'https://maps.googleapis.com/maps/api/geocode/json'
+  inputDir = './input'
+  dealers = []
+  sample = []
 
-  async main() {
-    //let ln = dealers.length
-    let ln = 2
+  constructor () {
+  }
+
+  main() {
+    this.getDealers()
+      .then(() => {
+        return this.populateData()
+      })
+      .then(dealers => console.log(JSON.stringify(dealers, 0, 2)))
+      .catch(error => { throw error })
+  }
+
+  /* adds latLng to dealers object, skips dealer if there is an error */
+  async populateData() {
     let calls = []
-    for (let i = 0; i < ln; i++) {
-      let dealer = dealers[i]
+
+    for (let id in this.dealers) {
+      let dealer = this.dealers[id]
+
+      if (!dealer.address) continue
+
       calls.push(
-        this.getDataFromAddress(dealer.address)
-          .then((data) => this.parseMapData(data))
+        this.getDataFromAddress(dealer.address, id)
+        .then(data => {
+          return this.parseMapData(data)
+        })
+        .then(location => {
+          if (!location) return null
+          location.name = dealer.name.toUpperCase()
+          location.phone = dealer.phone || dealer.phone2
+          location.email = dealer.email || dealer.email2
+          location.id = id
+          //location.id = (Number(id) + 174).toString()
+
+          return location
+        })
+        .catch((error) => {
+          console.log(id, dealer.name, dealer.address)
+          throw error
+        })
       )
-      //let data = await this.getDataFromAddress(dealer.address)
     }
-    let res = await Promise.all(calls)
-    console.log(res)
+
+    return await Promise.all(calls)
   }
 
   async parseMapData(data) {
-    let d = data[0]
+    let address = [
+      this.getAddressComponent(data, 'street_number'),
+      this.getAddressComponent(data, 'route') + ',',
+      this.getAddressComponent(data, 'postal_code'),
+      this.getAddressComponent(data, 'locality'),
+    ].join(' ')
+
+    if (!data) return null
+
     return {
-      street: this.getAddressComponent(data, 'street_number'),
-      route: this.getAddressComponent(data, 'route'),
-      postal: this.getAddressComponent(data, 'postal_code'),
-      locality: this.getAddressComponent(data, 'locality'),
+      address,
+      lat: data.geometry.location.lat,
+      lng: data.geometry.location.lng
     }
   }
 
   getAddressComponent(data, component) {
     if (!data) return
-    console.log(data)
+    let street_number = ""
 
-    let street_number = data.address_components
-      .filter(addr => {
-        this.addressComponentHasType(addr, component)
-      })[0]['long_name']
-
-    return street_number
+    try {
+      street_number =  data.address_components
+        .filter(addr => {
+          return this.addressComponentHasType(addr, component)
+        })
+      street_number = street_number[0]['long_name']
+    } catch (error) {
+      throw (error, data.address_components)
+    } finally {
+      return street_number
+    }
   }
 
   addressComponentHasType(addressComponent, type) {
     return addressComponent.types.includes(type)
   }
 
-  async getAllShopsLatLng(shops) {
-
-    let actions = shops.map(async function(shop, i) {
-      let address = await this.getAddressData(shop.address)
-      try {
-        let streetNumber = address.address_components
-          .filter(function(addressComponent) {
-            return filterAddressComponent(addressComponent, 'street_number')
-          })[0]['long_name']
-
-        let route = address.address_components
-          .filter(function(addressComponent) {
-            return filterAddressComponent(addressComponent, 'route')
-          })[0]['long_name']
-
-        let postal = address.address_components
-          .filter(function(addressComponent) {
-            return filterAddressComponent(addressComponent, 'postal_code')
-          })[0]['long_name']
-
-        let city = address.address_components
-          .filter(function(addressComponent) {
-            return filterAddressComponent(addressComponent, 'locality')
-          })[0]['long_name']
-
-        shop.id     = i.toString()
-        shop.street = streetNumber + '' + route
-        shop.postal = postal
-        shop.lat    = address.geometry.location.lat
-        shop.lng    = address.geometry.location.lng
-        shop.city   = city
-        shop.address = `${shop.street}, ${shop.postal}`
-      }
-      catch (error) {
-        console.log(error)
-      }
-      finally {
-        shop = shop.lat ? shop : undefined
-      }
-      return shop
-    })
-    let results = await Promise.all(actions)
-    return results.filter(x => x)
-  }
-
-  async getDataFromAddress(address) {
+  async getDataFromAddress(address, id) {
     if (!address) return
     const url = encodeURI(`${this.API}?address=${this.formatSpaces(address)}&key=${this.KEY}`)
 
-    return await axios.get(url)
-      .then(response => {
-        return response.data.results[0]
-      })
-      .catch(function (error) { console.log(error) })
+    return await axios
+      .get(url)
+      .then(response => response.data.results[0])
+      .catch((error) =>{ throw(error) })
   }
 
   formatSpaces(str) {
     if (!str) return
-    return str.split(' ').join('+')
+    return str
+      .split(',').join(' ')
+      .split('\n').join(' ')
+      .split(' ').join('+')
   }
 
-  getLatLng(address) {
+  getDealers() {
+    return new Promise((resolve, reject) => {
+      fs.readdir(this.inputDir, (error, files) => {
+        if (error) reject(new Error('Issue while looking up input files'))
 
+        for (let file of files) {
+          let dealers = require(`${this.inputDir}/${file}`)
+          this.dealers.push(...dealers)
+        }
+
+        resolve()
+      })
+    })
   }
 }
 
