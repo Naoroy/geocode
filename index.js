@@ -1,8 +1,10 @@
 const fs = require('fs')
 const axios = require('axios')
 
-class geocode {
-  KEY = 'AIzaSyCegDsZdHyK1Ea4KCdnjFRlIBkIkcdCiA8'
+require('dotenv').config()
+
+class Geocode {
+  KEY = process.env.GCP_API_KEY
   API = 'https://maps.googleapis.com/maps/api/geocode/json'
   inputDir = './input'
   dealers = []
@@ -126,5 +128,5 @@ class geocode {
   }
 }
 
-new geocode().main()
+new Geocode().main()
 
